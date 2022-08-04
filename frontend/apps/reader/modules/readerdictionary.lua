@@ -97,9 +97,12 @@ local function getDictionaryFixHtmlFunc(path)
 end
 
 function ReaderDictionary:init()
+    logger.info("******************************** Running ReaderDictionary:init() *************************")
     self.disable_lookup_history = G_reader_settings:isTrue("disable_lookup_history")
+    self.enable_dict_lang_matching = G_reader_settings:isTrue("enable_dict_lang_matching")
     self.dicts_order = G_reader_settings:readSetting("dicts_order", {})
     self.dicts_disabled = G_reader_settings:readSetting("dicts_disabled", {})
+    self.disabled_dicts_from_lang = {}
 
     if self.ui then
         self.ui.menu:registerToMainMenu(self)
@@ -134,6 +137,18 @@ function ReaderDictionary:init()
                 f:close()
                 local dictname = content:match("\nbookname=(.-)\n")
                 local is_html = content:find("sametypesequence=h", 1, true) ~= nil
+		local languages = {}
+		-- look for language codes in the form of XX-XX, i.e. EN-ES, EN-EN
+		-- we could also look for 2-letter words but this would definitely need
+		-- language code validation
+		for word in dictname:lower():gmatch("%S+") do
+		    if word:match("^%l%l%-%l%l$") then
+			for lang in word:gmatch("%l%l") do
+			    -- TODO: check that lang is a valid language code
+			    table.insert(languages, lang)
+			end
+		    end
+		end
                 -- sdcv won't use dict that don't have a bookname=
                 if dictname then
                     table.insert(available_ifos, {
@@ -142,6 +157,7 @@ function ReaderDictionary:init()
                         is_html = is_html,
                         css = readDictionaryCss(ifo_file:gsub("%.ifo$", ".css")),
                         fix_html_func = getDictionaryFixHtmlFunc(ifo_file:gsub("%.ifo$", ".lua")),
+			languages = languages,
                     })
                 end
             end
@@ -149,6 +165,24 @@ function ReaderDictionary:init()
         logger.dbg("found", #available_ifos, "dictionaries")
         self:sortAvailableIfos()
     end
+    -- patch start
+    -- Optionaly deactivate dicts for other languages
+    if self.enable_dict_lang_matching and self.ui.doc_settings then
+	local lang = self.ui.doc_settings:readSetting("doc_props").language
+	if lang and lang ~= "N/A" then
+	    -- keeping the first 2 characters of the language allows to deal with
+	    -- language codes like en_US and cases when the language name partially
+	    -- matches the language code (i.e. English, French...) but doesn't work 
+	    -- with all languages (i.e. Turkish, Bulgarian...)
+	    lang = lang:match("^%a%a") or "NONE"
+	    for _, ifo in pairs(available_ifos) do
+		if not table.concat(ifo.languages, '-'):match(lang) then
+		    self.disabled_dicts_from_lang[ifo.file] = true
+		end
+	    end
+	end
+    end
+    -- end patch
     -- Prepare the -u options to give to sdcv the dictionary order and if some are disabled
     self:updateSdcvDictNamesOptions()
 
@@ -172,7 +206,8 @@ function ReaderDictionary:sortAvailableIfos()
     end)
 end
 
-
+-- TODO: compare the "self.lang" field to the language field of the ebook before
+-- adding the dictionary to self.enabled_dict_names
 function ReaderDictionary:updateSdcvDictNamesOptions()
     -- We cannot tell sdcv which dictionaries to ignore, but we
     -- can tell it which dictionaries to use, by using multiple
@@ -194,9 +229,10 @@ function ReaderDictionary:updateSdcvDictNamesOptions()
     end
 
     local dicts_disabled = G_reader_settings:readSetting("dicts_disabled")
+    -- TODO: the check for ebook language should be done here
     for _, ifo in pairs(available_ifos) do
-        if not dicts_disabled[ifo.file] and not preferred_names_already_in[ifo.name] then
-            table.insert(self.enabled_dict_names, ifo.name)
+        if not dicts_disabled[ifo.file] and not self.disabled_dicts_from_lang[ifo.file] and not preferred_names_already_in[ifo.name] then
+	    table.insert(self.enabled_dict_names, ifo.name)
         end
     end
 end
@@ -265,6 +301,17 @@ function ReaderDictionary:addToMainMenu(menu_items)
                 text = _("Download dictionaries"),
                 sub_item_table = self:_genDownloadDictionariesMenu()
             },
+	    {
+		text = _("Enable matching languages only"),
+		checked_func = function()
+		    return self.enable_dict_lang_matching == true 
+		end,
+		callback = function()
+		    self.enable_dict_lang_matching = not self.enable_dict_lang_matching
+                    G_reader_settings:saveSetting("enable_dict_lang_matching", self.enable_dict_lang_matching)
+		    -- TODO implement option saving in settings
+		end,
+	    },
             {
                 text = _("Enable fuzzy search"),
                 checked_func = function()
