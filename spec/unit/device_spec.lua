@@ -16,6 +16,7 @@ describe("device module", function()
                     getRotationMode = function() return 0 end,
                     getScreenMode = function() return "portrait" end,
                     setRotationMode = function() end,
+                    scaleByDPI = function(this, dp) return math.ceil(dp * this:getDPI() / 160) end,
                 }
             end
         }
@@ -71,10 +72,12 @@ describe("device module", function()
             assert.is.same("Kobo_dahlia", kobo_dev.model)
         end)
 
-        it("should setup eventAdjustHooks properly for input in trilogy", function()
+        it("should setup eventAdjustHooks properly for input on trilogy C", function()
             os.getenv.invokes(function(key)
                 if key == "PRODUCT" then
                     return "trilogy"
+                elseif key == "MODEL_NUMBER" then
+                    return "320"
                 else
                     return osgetenv(key)
                 end
@@ -85,10 +88,8 @@ describe("device module", function()
             kobo_dev:init()
             local Screen = kobo_dev.screen
 
-            assert.is.same("Kobo_trilogy", kobo_dev.model)
-            assert.truthy(kobo_dev:needsTouchScreenProbe())
-            G_reader_settings:saveSetting("kobo_touch_switch_xy", true)
-            kobo_dev:touchScreenProbe()
+            assert.is.same("Kobo_trilogy_C", kobo_dev.model)
+            assert.falsy(kobo_dev:needsTouchScreenProbe())
             local x, y = Screen:getWidth()-5, 10
             -- mirror x, then switch_xy
             local ev_x = {
@@ -100,7 +101,7 @@ describe("device module", function()
             local ev_y = {
                 type = C.EV_ABS,
                 code = C.ABS_Y,
-                value = Screen:getWidth()-x,
+                value = Screen:getWidth() - 1 - x,
                 time = TimeVal:realtime(),
             }
 
@@ -124,6 +125,8 @@ describe("device module", function()
             os.getenv.invokes(function(key)
                 if key == "PRODUCT" then
                     return "trilogy"
+                elseif key == "MODEL_NUMBER" then
+                    return "320"
                 else
                     return osgetenv(key)
                 end
@@ -134,9 +137,8 @@ describe("device module", function()
             kobo_dev:init()
             local Screen = kobo_dev.screen
 
-            assert.is.same("Kobo_trilogy", kobo_dev.model)
-            assert.truthy(kobo_dev:needsTouchScreenProbe())
-            kobo_dev:touchScreenProbe()
+            assert.is.same("Kobo_trilogy_C", kobo_dev.model)
+            assert.falsy(kobo_dev:needsTouchScreenProbe())
             local x, y = Screen:getWidth()-5, 10
             local ev_x = {
                 type = C.EV_ABS,
@@ -147,7 +149,7 @@ describe("device module", function()
             local ev_y = {
                 type = C.EV_ABS,
                 code = C.ABS_Y,
-                value = Screen:getWidth()-x,
+                value = Screen:getWidth() - 1 - x,
                 time = {sec = 1000}
             }
 
